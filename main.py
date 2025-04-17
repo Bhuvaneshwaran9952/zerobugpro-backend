@@ -65,6 +65,8 @@ class User(Base):
     dateTime = Column(String, nullable=False)  
     payment = Column(String, index=True)
     address = Column(String, index=True)
+    status = Column(String, index=True)
+    certificate = Column(String, index=True)
     is_active = Column(Boolean, default=True)
 
 class Trainer(Base):   
@@ -120,6 +122,8 @@ class UserBase(BaseModel):
     dateTime: Optional[str] = datetime.utcnow().isoformat() 
     payment: str
     address: str
+    status: Optional[str] = None 
+    certificate: Optional[str] = None
     is_active: bool = True
 
 class UserCreate(UserBase):
