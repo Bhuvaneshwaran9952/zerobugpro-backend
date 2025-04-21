@@ -13,7 +13,8 @@ from datetime import date
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date
-
+from fastapi import  HTTPException, Depends
+from sqlalchemy.orm import Session
 
 # Load environment variables
 load_dotenv()
@@ -109,6 +110,14 @@ class TrainerPayment(Base):
     pay_date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=False)
 
+class Refund(Base):
+    __tablename__ = "refunds"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_name = Column(String, nullable=False)  
+    pay_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
+    refund_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
@@ -202,6 +211,25 @@ class TrainerPaymentCreate(TrainerPaymentBase):
 
 class TrainerPaymentResponse(TrainerPaymentBase):
     id: int
+
+
+class RefundBase(BaseModel):
+    student_name: str
+    pay_amount: float
+    refund_amount: float
+
+class RefundCreate(RefundBase):
+    pass
+
+class RefundUpdate(RefundBase):
+    pass
+
+class RefundResponse(RefundBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
 
 
 # ========== USER CRUD ==========
@@ -540,3 +568,55 @@ def delete_trainer_payment(payment_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"Trainer payment with ID {payment_id} deleted successfully"}
     
+# ========== REFUND CRUD OPERATIONS ==========
+
+# Create refund (already done)
+@app.post("/refund", response_model=RefundResponse)
+def create_refund(refund: RefundCreate, db: Session = Depends(get_db)):
+    new_refund = Refund(**refund.dict())
+    db.add(new_refund)
+    db.commit()
+    db.refresh(new_refund)
+    return new_refund
+
+
+# Get all refunds
+@app.get("/refund", response_model=list[RefundResponse])
+def get_all_refunds(db: Session = Depends(get_db)):
+    return db.query(Refund).all()
+
+
+# Get refund by ID
+@app.get("/refund/{refund_id}", response_model=RefundResponse)
+def get_refund(refund_id: int, db: Session = Depends(get_db)):
+    refund = db.query(Refund).get(refund_id)
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    return refund
+
+
+# Update refund
+@app.put("/refund/{refund_id}", response_model=RefundResponse)
+def update_refund(refund_id: int, updated_data: RefundUpdate, db: Session = Depends(get_db)):
+    refund = db.query(Refund).get(refund_id)
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    
+    for key, value in updated_data.dict().items():
+        setattr(refund, key, value)
+    
+    db.commit()
+    db.refresh(refund)
+    return refund
+
+
+# Delete refund
+@app.delete("/refund/{refund_id}")
+def delete_refund(refund_id: int, db: Session = Depends(get_db)):
+    refund = db.query(Refund).get(refund_id)
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    
+    db.delete(refund)
+    db.commit()
+    return {"message": "Refund deleted successfully"}
