@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import date
 from fastapi import  HTTPException, Depends
 from sqlalchemy.orm import Session
+from datetime import date
 
 # Load environment variables
 load_dotenv()
@@ -114,9 +115,19 @@ class Refund(Base):
     __tablename__ = "refunds"
 
     id = Column(Integer, primary_key=True, index=True)
-    student_name = Column(String, nullable=False)  
+    student_name = Column(String, nullable=False)
     pay_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
     refund_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
+
+class Interview(Base):
+    __tablename__ = "interviews"
+    id = Column(Integer, primary_key=True, index=True)
+    company = Column(String)
+    job_title = Column(String)
+    date = Column(Date)
+    details = Column(String)
+    extra_info = Column(String)
+
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -229,6 +240,13 @@ class RefundResponse(RefundBase):
 
     class Config:
         orm_mode = True
+
+class InterviewCreate(BaseModel):
+    company: str
+    job_title: str
+    date: date
+    details: str
+    extra_info: str
 
 
 
@@ -620,3 +638,17 @@ def delete_refund(refund_id: int, db: Session = Depends(get_db)):
     db.delete(refund)
     db.commit()
     return {"message": "Refund deleted successfully"}
+
+# ========== Interview CRUD OPERATIONS ==========
+
+@app.post("/interviews/")
+def create_interview(interview: InterviewCreate, db: Session = Depends(get_db)):
+    db_interview = Interview(**interview.dict())
+    db.add(db_interview)
+    db.commit()
+    db.refresh(db_interview)
+    return db_interview
+
+@app.get("/interviews/")
+def get_interviews(db: Session = Depends(get_db)):
+    return db.query(Interview).all()
