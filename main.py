@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Boolean, Column, Integer, String, DECIMAL, Date
+from sqlalchemy import create_engine, Boolean, Column, Integer, String, DECIMAL, Date, DateTime,Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.types import JSON
@@ -13,9 +13,22 @@ from datetime import date
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date
-from fastapi import  HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
-from datetime import date
+from datetime import datetime
+import os, shutil
+from sqlalchemy.ext.declarative import declarative_base
+from fastapi import HTTPException, status
+import shutil
+from fastapi import UploadFile, File
+
+router = APIRouter(prefix="/interviews", tags=["interviews"])
+
+STATIC_DIR = "static/logos"
+os.makedirs(STATIC_DIR, exist_ok=True)
+
 
 # Load environment variables
 load_dotenv()
@@ -119,18 +132,37 @@ class Refund(Base):
     pay_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
     refund_amount = Column(DECIMAL(10, 2), nullable=False, default=0.00)
 
+class RepeatedPayment(Base):
+    __tablename__ = "repeatedpayments"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    contact = Column(String, index=True)
+    payment_method = Column(String)
+
+class PaymentTotal(Base):
+    __tablename__ = "payment_total"  # <- exact name match is crucial
+
+    id = Column(Integer, primary_key=True, index=True)
+    amount = Column(Float)
+    date = Column(Date)
+    method = Column(String)
+
 class Interview(Base):
     __tablename__ = "interviews"
+
     id = Column(Integer, primary_key=True, index=True)
     company = Column(String)
-    job_title = Column(String)
-    date = Column(Date)
+    jobTitle = Column(String)
+    date = Column(String)
+    contact = Column(String)
+    location = Column(String)
     details = Column(String)
-    extra_info = Column(String)
-
+    information = Column(String)
+    logo_filename = Column(String, nullable=True)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
 
 # ========== SCHEMAS ==========
 class UserBase(BaseModel):
@@ -241,13 +273,66 @@ class RefundResponse(RefundBase):
     class Config:
         orm_mode = True
 
-class InterviewCreate(BaseModel):
-    company: str
-    job_title: str
-    date: date
-    details: str
-    extra_info: str
+class RepeatedPaymentBase(BaseModel):
+    name: str
+    contact: str
+    payment_method: str
 
+class RepeatedPaymentCreate(RepeatedPaymentBase):
+    pass
+
+class RepeatedPaymentOut(RepeatedPaymentBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
+class PaymentTotalBase(BaseModel):
+    amount: float
+    date: date 
+    method: str
+
+class PaymentTotalCreate(PaymentTotalBase):
+    pass  
+
+class PaymentTotalOut(PaymentTotalBase):
+    id: int 
+    class Config:
+        orm_mode = True 
+
+class PaymentTotalUpdate(BaseModel):
+    amount: float | None = None
+    date: date 
+    method: str | None = None
+
+class InterviewBase(BaseModel):
+    company: str
+    jobTitle: str  # Changed to match the model field name
+    location: str
+    date: str
+    mode: Optional[str] = None  # Made optional
+    logo: Optional[str] = None  # Made optional
+    information: str
+    details: str
+
+# For creating a new interview, inherits from InterviewBase
+class InterviewCreate(InterviewBase):
+    pass
+
+# Response model (for returning interviews to clients)
+class InterviewOut(BaseModel):
+    id: int
+    company: str
+    jobTitle: str  # Now matches the model
+    date: str
+    contact: str
+    location: str
+    details: str
+    information: str
+    logo_filename: Optional[str] = None
+
+    class Config:
+        orm_mode = True
 
 
 # ========== USER CRUD ==========
@@ -588,67 +673,170 @@ def delete_trainer_payment(payment_id: int, db: Session = Depends(get_db)):
     
 # ========== REFUND CRUD OPERATIONS ==========
 
-# Create refund (already done)
+
 @app.post("/refund", response_model=RefundResponse)
-def create_refund(refund: RefundCreate, db: Session = Depends(get_db)):
-    new_refund = Refund(**refund.dict())
+def create_refund(payment: RefundCreate, db: Session = Depends(get_db)):
+    new_refund = Refund(**payment.dict())
     db.add(new_refund)
     db.commit()
     db.refresh(new_refund)
-    return new_refund
+    return {
+        "id": new_refund.id,
+        "student_name": new_refund.student_name,
+        "pay_amount": float(new_refund.pay_amount),
+        "refund_amount": float(new_refund.refund_amount),
+    }
 
+@app.get("/refund", response_model=List[RefundResponse])
+def read_refunds(db: Session = Depends(get_db)):
+    refunds = db.query(Refund).all()
+    return [
+        {
+            "id": refund.id,
+            "student_name": refund.student_name,
+            "pay_amount": float(refund.pay_amount),
+            "refund_amount": float(refund.refund_amount),
+        }
+        for refund in refunds
+    ]
 
-# Get all refunds
-@app.get("/refund", response_model=list[RefundResponse])
-def get_all_refunds(db: Session = Depends(get_db)):
-    return db.query(Refund).all()
+# ========== REPEATED PAYMENT CURD OPERATIONS =============
 
+@app.get("/repeatedpayments", response_model=List[RepeatedPaymentOut])
+def get_repeated_payments(db: Session = Depends(get_db)):
+    return db.query(RepeatedPayment).all()
 
-# Get refund by ID
-@app.get("/refund/{refund_id}", response_model=RefundResponse)
-def get_refund(refund_id: int, db: Session = Depends(get_db)):
-    refund = db.query(Refund).get(refund_id)
-    if not refund:
-        raise HTTPException(status_code=404, detail="Refund not found")
-    return refund
+@app.post("/repeatedpayments", response_model=RepeatedPaymentOut)
+def create_repeated_payment(payment: RepeatedPaymentCreate, db: Session = Depends(get_db)):
+    try:
+        # Create a new repeated payment instance
+        new_repeatedpayment = RepeatedPayment(**payment.dict())
 
+        # Add the new entry to the session and commit
+        db.add(new_repeatedpayment)
+        db.commit()
+        db.refresh(new_repeatedpayment)
 
-# Update refund
-@app.put("/refund/{refund_id}", response_model=RefundResponse)
-def update_refund(refund_id: int, updated_data: RefundUpdate, db: Session = Depends(get_db)):
-    refund = db.query(Refund).get(refund_id)
-    if not refund:
-        raise HTTPException(status_code=404, detail="Refund not found")
+        # Return a simplified response with selected fields
+        return {
+            "id": new_repeatedpayment.id,
+            "name": new_repeatedpayment.name,
+            "contact": new_repeatedpayment.contact,
+            "payment_method": new_repeatedpayment.payment_method
+        }
+
+    except Exception as e:
+        db.rollback()  # Rollback in case of an error
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Error creating repeated payment: {str(e)}"
+        )
+
+@app.delete("/repeatedpayments/{id}", response_model=RepeatedPaymentOut)
+def delete_repeated_payment(id: int, db: Session = Depends(get_db)):
+    payment_to_delete = db.query(RepeatedPayment).filter(RepeatedPayment.id == id).first()
     
-    for key, value in updated_data.dict().items():
-        setattr(refund, key, value)
+    if payment_to_delete is None:
+        raise HTTPException(status_code=404, detail="Payment not found")
     
+    db.delete(payment_to_delete)
     db.commit()
-    db.refresh(refund)
-    return refund
+    return payment_to_delete
 
+# ========== Payment Total CURD OPERATIONS =============
 
-# Delete refund
-@app.delete("/refund/{refund_id}")
-def delete_refund(refund_id: int, db: Session = Depends(get_db)):
-    refund = db.query(Refund).get(refund_id)
-    if not refund:
-        raise HTTPException(status_code=404, detail="Refund not found")
+@app.get("/paymenttotal", response_model=List[PaymentTotalOut])
+def get_all_paymenttotals(db: Session = Depends(get_db)):
+    payments = db.query(PaymentTotal).all()
+    return payments
+
+@app.get("/paymenttotal/{payment_id}", response_model=PaymentTotalOut)
+def get_paymenttotal(payment_id: int, db: Session = Depends(get_db)):
+    payment = db.query(PaymentTotal).filter(PaymentTotal.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return payment
+
+@app.post("/paymenttotal", response_model=PaymentTotalOut)
+def create_paymenttotal(payment: PaymentTotalCreate, db: Session = Depends(get_db)):
+    try:
+        new_payment_total = PaymentTotal(**payment.dict())  # Ensure `payment.dict()` matches the model
+        db.add(new_payment_total)
+        db.commit()
+        db.refresh(new_payment_total)
+
+        return {
+            "id": new_payment_total.id,
+            "amount": new_payment_total.amount,
+            "date": new_payment_total.date,
+            "method": new_payment_total.method
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Error creating payment total: {str(e)}"
+        )
     
-    db.delete(refund)
+@app.delete("/paymenttotal/{payment_id}", response_model=PaymentTotalOut)
+def delete_payment(payment_id: int, db: Session = Depends(get_db)):
+    payment = db.query(PaymentTotal).filter(PaymentTotal.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    db.delete(payment)
     db.commit()
-    return {"message": "Refund deleted successfully"}
+    return payment
 
-# ========== Interview CRUD OPERATIONS ==========
+# ========== INTERVIEW CURD OPERATIONS =============
+
+@app.get("/interviews/", response_model=List[InterviewOut])
+def get_all_interviews(db: Session = Depends(get_db)):
+    interviews = db.query(Interview).all()
+    return interviews
+
+@app.get("/interviews/{interview_id}", response_model=InterviewOut)
+def get_interview(interview_id: int, db: Session = Depends(get_db)):
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    return interview
 
 @app.post("/interviews/")
-def create_interview(interview: InterviewCreate, db: Session = Depends(get_db)):
-    db_interview = Interview(**interview.dict())
-    db.add(db_interview)
-    db.commit()
-    db.refresh(db_interview)
-    return db_interview
+async def create_interview(
+    logo: UploadFile = File(...),
+    company: str = Form(...),
+    jobTitle: str = Form(...),
+    date: str = Form(...),
+    contact: str = Form(...),
+    location: str = Form(...),
+    details: str = Form(...),
+    information: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    # Save logo to static folder
+    logo_path = f"static/{logo.filename}"
+    with open(logo_path, "wb") as buffer:
+        shutil.copyfileobj(logo.file, buffer)
 
-@app.get("/interviews/")
-def get_interviews(db: Session = Depends(get_db)):
-    return db.query(Interview).all()
+    interview = Interview(
+        company=company,
+        jobTitle=jobTitle,
+        date=date,
+        contact=contact,
+        location=location,
+        details=details,
+        information=information,
+        logo_filename=logo.filename,
+    )
+    db.add(interview)
+    db.commit()
+    db.refresh(interview)
+    return {"message": "Interview created successfully", "id": interview.id}
+
+@app.post("/upload/")
+async def upload_file(logo: UploadFile = File(...)):
+    upload_path = f"static/logos/{logo.filename}"
+    with open(upload_path, "wb") as buffer:
+        shutil.copyfileobj(logo.file, buffer)
+    return {"filename": logo.filename}
