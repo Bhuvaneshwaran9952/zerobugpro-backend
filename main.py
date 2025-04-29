@@ -23,11 +23,14 @@ from sqlalchemy.ext.declarative import declarative_base
 from fastapi import HTTPException, status
 import shutil
 from fastapi import UploadFile, File
+from fastapi.staticfiles import StaticFiles
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
 STATIC_DIR = "static/logos"
 os.makedirs(STATIC_DIR, exist_ok=True)
+
+
 
 
 # Load environment variables
@@ -700,24 +703,86 @@ def read_refunds(db: Session = Depends(get_db)):
         for refund in refunds
     ]
 
+@app.get("/refund/{refund_id}", response_model=RefundResponse)
+def read_refund(refund_id: int, db: Session = Depends(get_db)):
+    db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not db_refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+
+    return {
+        "id": db_refund.id,
+        "student_name": db_refund.student_name,
+        "pay_amount": db_refund.pay_amount,
+        "refund_amount": db_refund.refund_amount,
+    }
+
+@app.put("/refund/{refund_id}", response_model=RefundResponse)
+def update_refund(refund_id: int, updated_data: RefundBase, db: Session = Depends(get_db)):
+    refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+
+    for key, value in updated_data.dict().items():
+        setattr(refund, key, value)
+
+    db.commit()
+    db.refresh(refund)
+
+    return {
+        "id": refund.id,
+        "student_name": refund.student_name,
+        "pay_amount": refund.pay_amount,
+        "refund_amount": refund.refund_amount,
+    }
+
 # ========== REPEATED PAYMENT CURD OPERATIONS =============
 
 @app.get("/repeatedpayments", response_model=List[RepeatedPaymentOut])
 def get_repeated_payments(db: Session = Depends(get_db)):
     return db.query(RepeatedPayment).all()
 
+@app.get("/repeatedpayments/{payment_id}", response_model=RepeatedPaymentOut)
+def read_repeated_payment(payment_id: int, db: Session = Depends(get_db)):
+    db_payment = db.query(RepeatedPayment).filter(RepeatedPayment.id == payment_id).first()
+    if not db_payment:
+        raise HTTPException(status_code=404, detail="Repeated payment not found")
+
+    return {
+        "id": db_payment.id,
+        "name": db_payment.name,
+        "contact": db_payment.contact,
+        "payment_method": db_payment.payment_method,
+    }
+
+@app.put("/repeatedpayments/{payment_id}", response_model=RepeatedPaymentOut)
+def update_repeated_payment(payment_id: int, updated_data: RepeatedPaymentBase, db: Session = Depends(get_db)):
+    payment = db.query(RepeatedPayment).filter(RepeatedPayment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Repeated payment not found")
+
+    for key, value in updated_data.dict().items():
+        setattr(payment, key, value)
+
+    db.commit()
+    db.refresh(payment)
+
+    return {
+        "id": payment.id,
+        "name": payment.name,
+        "contact": payment.contact,
+        "payment_method":payment.payment_method,
+
+    }
+
 @app.post("/repeatedpayments", response_model=RepeatedPaymentOut)
 def create_repeated_payment(payment: RepeatedPaymentCreate, db: Session = Depends(get_db)):
     try:
-        # Create a new repeated payment instance
         new_repeatedpayment = RepeatedPayment(**payment.dict())
 
-        # Add the new entry to the session and commit
         db.add(new_repeatedpayment)
         db.commit()
         db.refresh(new_repeatedpayment)
 
-        # Return a simplified response with selected fields
         return {
             "id": new_repeatedpayment.id,
             "name": new_repeatedpayment.name,
@@ -726,7 +791,7 @@ def create_repeated_payment(payment: RepeatedPaymentCreate, db: Session = Depend
         }
 
     except Exception as e:
-        db.rollback()  # Rollback in case of an error
+        db.rollback() 
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Error creating repeated payment: {str(e)}"
@@ -840,3 +905,14 @@ async def upload_file(logo: UploadFile = File(...)):
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(logo.file, buffer)
     return {"filename": logo.filename}
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.delete("/interviews/{interview_id}")
+def delete_interview(interview_id: int, db: Session = Depends(get_db)):
+    db_interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if not db_interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    db.delete(db_interview)
+    db.commit()
+    return {"message": "Interview deleted successfully"}
