@@ -310,23 +310,22 @@ class PaymentTotalUpdate(BaseModel):
 
 class InterviewBase(BaseModel):
     company: str
-    jobTitle: str  # Changed to match the model field name
+    jobTitle: str  
     location: str
     date: str
-    mode: Optional[str] = None  # Made optional
-    logo: Optional[str] = None  # Made optional
+    mode: Optional[str] = None 
+    logo: Optional[str] = None 
     information: str
     details: str
 
-# For creating a new interview, inherits from InterviewBase
+
 class InterviewCreate(InterviewBase):
     pass
 
-# Response model (for returning interviews to clients)
 class InterviewOut(BaseModel):
     id: int
     company: str
-    jobTitle: str  # Now matches the model
+    jobTitle: str  
     date: str
     contact: str
     location: str
@@ -822,6 +821,23 @@ def get_paymenttotal(payment_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Payment not found")
     return payment
 
+@app.put("/paymenttotal/{payment_id}", response_model=PaymentTotalOut)
+async def update_payment(payment_id: int, payment: PaymentTotalUpdate, db: Session = Depends(get_db)):
+    db_payment = db.query(PaymentTotal).filter(PaymentTotal.id == payment_id).first()
+    
+    if not db_payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    db_payment.amount = payment.amount
+    db_payment.date = payment.date
+    db_payment.method = payment.method
+
+    db.commit()
+    db.refresh(db_payment)
+    
+    return db_payment
+
+
 @app.post("/paymenttotal", response_model=PaymentTotalOut)
 def create_paymenttotal(payment: PaymentTotalCreate, db: Session = Depends(get_db)):
     try:
@@ -843,7 +859,8 @@ def create_paymenttotal(payment: PaymentTotalCreate, db: Session = Depends(get_d
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Error creating payment total: {str(e)}"
         )
-    
+
+ 
 @app.delete("/paymenttotal/{payment_id}", response_model=PaymentTotalOut)
 def delete_payment(payment_id: int, db: Session = Depends(get_db)):
     payment = db.query(PaymentTotal).filter(PaymentTotal.id == payment_id).first()
