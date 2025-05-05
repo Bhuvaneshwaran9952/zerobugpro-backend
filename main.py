@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Boolean, Column, Integer, String, DECIMAL, Date, DateTime,Float
+from sqlalchemy import create_engine, Boolean, Column, Integer, String, DECIMAL, Date,Float,ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.types import JSON
@@ -143,7 +143,7 @@ class RepeatedPayment(Base):
     payment_method = Column(String)
 
 class PaymentTotal(Base):
-    __tablename__ = "payment_total"  # <- exact name match is crucial
+    __tablename__ = "payment_total"
 
     id = Column(Integer, primary_key=True, index=True)
     amount = Column(Float)
@@ -158,9 +158,12 @@ class Interview(Base):
     jobTitle = Column(String)
     date = Column(String)
     contact = Column(String)
+    email = Column(String, unique=True, index=True)
     location = Column(String)
     details = Column(String)
     information = Column(String)
+    skills = Column(ARRAY(String))
+    duration = Column(String)   
     logo_filename = Column(String, nullable=True)
 
 # Create database tables
@@ -311,10 +314,13 @@ class PaymentTotalUpdate(BaseModel):
 class InterviewBase(BaseModel):
     company: str
     jobTitle: str  
+    email: str
     location: str
     date: str
     mode: Optional[str] = None 
     logo: Optional[str] = None 
+    skills: List[str]
+    duration: str
     information: str
     details: str
 
@@ -328,7 +334,10 @@ class InterviewOut(BaseModel):
     jobTitle: str  
     date: str
     contact: str
+    email: str
     location: str
+    skills: List[str]  
+    duration: str
     details: str
     information: str
     logo_filename: Optional[str] = None
@@ -341,9 +350,6 @@ class InterviewOut(BaseModel):
 @app.post("/users", response_model=UserResponse)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     try:
-        # if not user.dateTime:  # Assign default value if None
-            # user.dateTime = datetime.utcnow().isoformat()
-
         logging.info(f"Processed data: {user.dict()}")
 
         db_user = User(**user.dict())
@@ -494,15 +500,14 @@ def create_payment(payment_data: PaymentBase, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_payment)
 
-    # Convert `pay_date` and `due_date` to string before returning
     return {
         "id": new_payment.id,
         "student_name": new_payment.student_name,
         "payment_method": new_payment.payment_method,
-        "pay_amount": float(new_payment.pay_amount),  # Convert Decimal to float
-        "pending_payment": float(new_payment.pending_payment),  # Convert Decimal to float
-        "pay_date": new_payment.pay_date.strftime("%Y-%m-%d"),  # Convert to string
-        "due_date": new_payment.due_date.strftime("%Y-%m-%d")  # Convert to string
+        "pay_amount": float(new_payment.pay_amount),  
+        "pending_payment": float(new_payment.pending_payment), 
+        "pay_date": new_payment.pay_date.strftime("%Y-%m-%d"), 
+        "due_date": new_payment.due_date.strftime("%Y-%m-%d"),
     }
 
 @app.get("/payment", response_model=List[PaymentResponse])
@@ -529,7 +534,6 @@ def read_payment(payment_id: int, db: Session = Depends(get_db)):
     if not db_payment:
         raise HTTPException(status_code=404, detail="Payment not found")
 
-    # Convert pay_date to string before returning
     return {
         "id": db_payment.id,
         "student_name": db_payment.student_name,
@@ -556,15 +560,14 @@ def update_payment(payment_id: int, updated_data: PaymentBase, db: Session = Dep
     db.commit()
     db.refresh(payment)
 
-    # Convert `pay_date` to string before returning response
     return {
         "id": payment.id,
         "student_name": payment.student_name,
         "payment_method": payment.payment_method,
-        "pay_amount": float(payment.pay_amount),  # Convert Decimal to float
-        "pending_payment": float(payment.pending_payment),  # Convert Decimal to float
-        "pay_date": payment.pay_date.strftime("%Y-%m-%d"),  # Convert date to string
-        "due_date": payment.due_date.strftime("%Y-%m-%d")  # Convert date to string
+        "pay_amount": float(payment.pay_amount),  
+        "pending_payment": float(payment.pending_payment),  
+        "pay_date": payment.pay_date.strftime("%Y-%m-%d"),  
+        "due_date": payment.due_date.strftime("%Y-%m-%d")  
     }
 
 
@@ -841,7 +844,7 @@ async def update_payment(payment_id: int, payment: PaymentTotalUpdate, db: Sessi
 @app.post("/paymenttotal", response_model=PaymentTotalOut)
 def create_paymenttotal(payment: PaymentTotalCreate, db: Session = Depends(get_db)):
     try:
-        new_payment_total = PaymentTotal(**payment.dict())  # Ensure `payment.dict()` matches the model
+        new_payment_total = PaymentTotal(**payment.dict()) 
         db.add(new_payment_total)
         db.commit()
         db.refresh(new_payment_total)
@@ -891,12 +894,14 @@ async def create_interview(
     jobTitle: str = Form(...),
     date: str = Form(...),
     contact: str = Form(...),
+    email: str = Form(...),
     location: str = Form(...),
+    skills: str = Form(...),
+    duration: str = Form (...),
     details: str = Form(...),
     information: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Save logo to static folder
     logo_path = f"static/{logo.filename}"
     with open(logo_path, "wb") as buffer:
         shutil.copyfileobj(logo.file, buffer)
@@ -906,7 +911,10 @@ async def create_interview(
         jobTitle=jobTitle,
         date=date,
         contact=contact,
+        email=email,
         location=location,
+        skills = skills,
+        duration = duration,
         details=details,
         information=information,
         logo_filename=logo.filename,
@@ -933,3 +941,4 @@ def delete_interview(interview_id: int, db: Session = Depends(get_db)):
     db.delete(db_interview)
     db.commit()
     return {"message": "Interview deleted successfully"}
+
