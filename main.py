@@ -942,3 +942,40 @@ def delete_interview(interview_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Interview deleted successfully"}
 
+@app.put("/interviews/{interview_id}")
+async def update_interview(
+    interview_id: int,
+    company: str = Form(...),
+    jobTitle: str = Form(...),
+    date: str = Form(...),
+    contact: str = Form(...),
+    email: str = Form(...),
+    location: str = Form(...), 
+    details: str = Form(...),
+    information: Optional[str] = Form(None),
+    skills: List[str] = Form(...),
+    duration: str = Form(...),
+    logo: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    interview.company = company
+    interview.jobTitle = jobTitle
+    interview.date = date
+    interview.contact = contact
+    interview.email = email
+    interview.location = location
+    interview.details = details
+    interview.information = information
+    interview.skills = skills
+    interview.duration = duration
+
+    if logo:
+        interview.logo = await logo.read()  
+
+    db.commit()
+    db.refresh(interview)
+    return {"message": "Interview updated successfully", "interview": interview}
