@@ -24,6 +24,9 @@ from fastapi import HTTPException, status
 import shutil
 from fastapi import UploadFile, File
 from fastapi.staticfiles import StaticFiles
+from typing import List, Optional
+from fastapi import Query
+from sqlalchemy import or_
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
@@ -164,7 +167,22 @@ class Interview(Base):
     information = Column(String)
     skills = Column(ARRAY(String))
     duration = Column(String)   
+    experience = Column(String)
     logo_filename = Column(String, nullable=True)
+
+class Apply(Base):
+    __tablename__ = "apply"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    contact = Column(String)
+    email = Column(String)
+    location = Column(String)
+    skills = Column(String)
+    experience = Column(String)
+    current_salary = Column(String)
+    expected_salary = Column(String)
+    resum_filename = Column(String)   
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -321,6 +339,7 @@ class InterviewBase(BaseModel):
     logo: Optional[str] = None 
     skills: List[str]
     duration: str
+    experience: str
     information: str
     details: str
 
@@ -338,9 +357,35 @@ class InterviewOut(BaseModel):
     location: str
     skills: List[str]  
     duration: str
+    experience: str
     details: str
     information: str
     logo_filename: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+class ApplyBase (BaseModel):
+    resum: Optional[str] = None
+    name: str
+    contact: str
+    email: str
+    location: str
+    skills: List[str] 
+    experience: str 
+    current_salary: str
+    expected_salary: str
+
+class ApplyOut (BaseModel):
+    resum: Optional[str] = None
+    name: str
+    contact: str
+    email: str
+    location: str
+    skills: str
+    experience: str 
+    current_salary: str
+    expected_salary: str
 
     class Config:
         orm_mode = True
@@ -898,6 +943,7 @@ async def create_interview(
     location: str = Form(...),
     skills: str = Form(...),
     duration: str = Form (...),
+    experience: str = Form (...),
     details: str = Form(...),
     information: str = Form(...),
     db: Session = Depends(get_db)
@@ -915,6 +961,7 @@ async def create_interview(
         location=location,
         skills = skills,
         duration = duration,
+        experience = experience,
         details=details,
         information=information,
         logo_filename=logo.filename,
@@ -955,6 +1002,7 @@ async def update_interview(
     information: Optional[str] = Form(None),
     skills: List[str] = Form(...),
     duration: str = Form(...),
+    experience: str = Form(...),
     logo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
@@ -972,6 +1020,7 @@ async def update_interview(
     interview.information = information
     interview.skills = skills
     interview.duration = duration
+    interview.experience = experience
 
     if logo:
         interview.logo = await logo.read()  
@@ -979,3 +1028,91 @@ async def update_interview(
     db.commit()
     db.refresh(interview)
     return {"message": "Interview updated successfully", "interview": interview}
+
+# ======== Application CURD OPERATIONS ========
+
+@app.get("/apply/", response_model=List[ApplyOut])
+def get_all_apply(db: Session = Depends(get_db)):
+    apply = db.query(Apply).all()
+    return apply
+
+
+@app.post("/apply/")
+async def create_apply(
+    resum: UploadFile = File(...),
+    name: str = Form(...),
+    contact: str = Form(...),
+    email: str = Form(...),
+    location: str = Form(...),
+    skills: str = Form(...),
+    experience: str = Form(...),
+    current_salary: str = Form(...),
+    expected_salary: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    file_path = f"static/{resum.filename}"
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(resum.file, buffer)
+
+    apply = Apply(
+        name=name,
+        contact=contact,
+        email=email,
+        location=location,
+        skills=skills,
+        experience=experience,
+        current_salary=current_salary,
+        expected_salary=expected_salary,
+        resum_filename=resum.filename,
+    )
+    db.add(apply)
+    db.commit()
+    db.refresh(apply)
+    return {"message": "Application created successfully", "id": apply.id}
+
+# ======== Filter CURD OPERATIONS ========
+
+@app.get("/interviews/")
+def get_interviews(
+    search: str = "",
+    locations: str = Query(""),
+    job_titles: str = Query(""),
+    durations: str = Query(""),
+    experiences: str = Query(""),
+    db: Session = Depends(get_db)
+):
+    location_list = locations.split(",") if locations else []
+    job_title_list = job_titles.split(",") if job_titles else []
+    duration_list = durations.split(",") if durations else []
+    experience_list = experiences.split(",") if experiences else []
+
+    query = db.query(Interview)
+
+    if search:
+        query = query.filter(
+            Interview.job_title.ilike(f"%{search}%") |
+            Interview.location.ilike(f"%{search}%")
+        )
+
+    if location_list:
+        query = query.filter(Interview.location.in_(location_list))
+
+    if job_title_list:
+        query = query.filter(Interview.job_title.in_(job_title_list))
+
+    if duration_list:
+        query = query.filter(Interview.duration.in_(duration_list))
+
+    if experience_list:
+        query = query.filter(Interview.experience.in_(experience_list))
+
+    if search:
+      query = query.filter(
+        or_(
+            Interview.jobTitle.ilike(f"%{search}%"),
+            Interview.location.ilike(f"%{search}%")
+        )
+    )
+
+
+    return query.all()
